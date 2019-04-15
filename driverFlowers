@@ -1,0 +1,186 @@
+ruleset DriverFlowers {
+  meta {
+    use module io.picolabs.subscription alias Subscriptions
+    use module StoresManager
+    
+    shares __testing, getOrders
+    logging on
+  }
+  
+  global {
+    __testing = { 
+        "queries": [ 
+          { "name": "getOrders", "args": [ ] }
+        ],
+        "events": [ 
+          { "domain": "driver", "type": "fakeOrder", "attrs" : ["store", "id", "minRank", "maxTime"] },
+          { "domain": "driver", "type": "orderRequested", "attrs" : ["storeId"] },
+          { "domain": "driver", "type": "fakeCompletion", "attrs" : ["store", "id", "minRank", "maxTime"] }
+        ]
+    }
+    
+    // orders = {};//{"s1":"order", "s2":"order2"}; //store:newestOrder
+    
+    getOrders = function() {
+      ent:orders.decode()
+    }
+    
+    timeCompare = function(time) {
+      //time formatted 2019-04-15T15:03:25.730Z
+      // time.split()
+    }
+  }
+  
+  rule fakeOrder {
+    select when driver fakeOrder 
+    pre {
+      //time formatted 2019-04-15T15:03:25.730Z
+      order = {
+        "store" : event:attr("store"), "id" : event:attr("id"),
+        "minRank" : event:attr("minRank"), "maxTime" : event:attr("maxTime")
+      };
+    }
+    
+    always {
+      raise driver event "availableOrder" 
+        attributes {
+          "order" : order
+        }
+    }
+  }
+  
+  rule fakeCompletion {
+    select when driver fakeCompletion
+    pre {
+      order = {
+        "store" : event:attr("store"), "id" : event:attr("id"),
+        "minRank" : event:attr("minRank"), "maxTime" : event:attr("maxTime")
+      };
+      
+      bid = {};
+    }
+    
+    always {
+      raise driver event "completedOrder" 
+        attributes {
+          "bid" : bid,
+          "order" : order
+        }
+    }
+  }
+  
+  rule receiveOrder {
+    select when driver availableOrder
+    pre {
+      store = event:attr("order"){"store"};
+      id = event:attr("order"){"id"};
+      myId = ent:orders{[store,"id"]};
+      info = store + ":" + id;
+    }
+    
+    //id is unseen or greater than anything I've seen
+    if(myId == null || id > myId) then
+      send_directive("driver", {"recieved order": info});
+
+      
+    fired {
+      raise gossip event "orderReady"
+        attributes {
+          "order" : event:attr("order")
+        };
+        
+      ent:orders{store} := event:attr("order"); //inserted if doesn't exist
+    }
+  }
+    
+  rule placeBid {
+    select when driver orderRequested 
+    pre {
+      order = ent:orders{event:attr("storeId")};
+      
+      amount = random:integer(lower = 5, upper = 10);
+      meetsRequirements = ent:myRank.defaultsTo(0) >= order{"minRank"};
+      
+      storeSub = StoresManager:getStores().filter(function(x){x{"name"} == order{"storeId"}})[0];
+      recognizeStore = storeSub != null;
+      
+      info = event:attr("storeId") + ":" + order{"id"} + ":" + amount;
+      
+      bid = {
+        "fromEci":storeSub{"Rx"},
+        "orderId":order{"id"},
+        "bid": amount
+      }
+    }
+    
+    if(not ent:delivering.defaultsTo(false) && meetsRequirements && recognizeStore) then
+      every {
+        send_directive("driver", {"placingBid": info});
+        event:send(
+          {
+            "eci": storeSub{"Tx"}, "eid": "bid",
+            "domain": "store", "type": "requestedOrder",
+            "attrs": { 
+              "bid" : bid
+            } 
+          }
+        );
+      }
+  }
+  
+  // event:attr("order"); //because only store one order, maybe overwritten
+  rule startDelivery {
+    select when driver confirmedOrder
+    pre {
+      info = event:attr("order"){"store"} + ":" + event:attr("order"){"id"};
+    }
+    
+    send_directive("driver", {"startingDelivery": info}) 
+    
+    always {
+      ent:delivering := true;
+    
+      schedule driver event "completedOrder" at time:add(time:now(), {"minutes": 1})
+    }
+  }
+  
+  // rule finishOrder {
+  //   select when driver completedOrder
+  //   pre {
+  //     storeSub = StoresManager:getStores().filter(function(x){
+  //       x{"name"} == event:attr("order"){"storeId"}
+  //     })[0];
+
+  //     info = event:attr("order"){"store"} + ":" + event:attr("order"){"id"}
+  //       + " at " + time:now();
+  //   }
+    
+  //   every {
+  //     send_directive("driver", {"finished order": info});
+  //     event:send(
+  //       {
+  //         "eci": storeSub{"Tx"}, "eid": "finished",
+  //         "domain": "store", "type": "completedOrder",
+  //         "attrs": { 
+  //           "bid":event:attr("bid"),
+  //           "order":event:attr("order")
+  //         } 
+  //       }
+  //     ); 
+  //   }
+  // }
+  
+  rule rankUp {
+    select when driver completedOrder
+    pre {
+      inTime = time:compare(time:now, event:attr("order"){"maxTime"}).klog();
+    }
+    
+    if(inTime) then
+      send_directive("driver", {"finished order": info});
+      
+    fired {
+      ent:myRank := ent:myRank.defaultsTo(0) + 1;
+    }
+  }
+}
