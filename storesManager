@@ -20,7 +20,7 @@ ruleset StoresManager {
           { "name": "getStores", "args": [ ] }
         ],
         "events": [ 
-          { "domain": "subscription", "type": "newStore", "attrs" : ["rxRole", "toEci", "storeId"] }
+          { "domain": "subscription", "type": "newStore", "attrs" : ["toEci", "storeId"] }
         ]
     }
   }
@@ -35,8 +35,8 @@ ruleset StoresManager {
       raise subscription event "introduction" 
         attributes {
           "name" : event:attr("storeId"),
-          "rxRole" : event:attr("rxRole"),
-          "txRole" : "Store",
+          "rxRole" : "driver",
+          "txRole" : "store",
           "toEci" : event:attr("toEci")
         }
     }
