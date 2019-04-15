@@ -1,0 +1,39 @@
+ruleset DriverGossip {
+  meta {
+    use module io.picolabs.subscription alias Subscriptions
+    use module DriversManager
+    
+    shares __testing, getOrders
+    logging on
+  }
+  
+  global {
+    sendOrder = defaction(toEci, order) {
+      event:send(
+          {
+            "eci": toEci, "eid": "sending order",
+            "domain": "driver", "type": "availableOrder",
+            "attrs": {
+              "order" : order
+            } 
+          }
+      );
+    }
+  }
+  
+  rule spreadOrder {
+    select when gossip orderReady
+    foreach DriversManager:getDrivers() setting(x) //x driverTx
+    
+    pre {
+       orderInfo = event:attr("order"){"store"} + ":" 
+        + event:attr("order"){"id"};
+       info = orderInfo + " to " + x;  
+    }
+    
+    every {
+      send_directive("gossip", {"sending order": info});
+      sendOrder(x, event:attr("order"));
+    }
+  }
+}
