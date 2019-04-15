@@ -1,0 +1,44 @@
+ruleset DriversManager {
+  meta {
+    use module io.picolabs.subscription alias Subscriptions
+    // use module SubscriptionsManager alias subsMan
+    
+    shares __testing, getDrivers
+    provides getDrivers
+    logging on
+  }
+  
+  global {
+    //returns their tx
+    getDrivers = function() {
+      subs = Subscriptions:established("Tx_role", "driver");
+      subs.map(function(x){x{"Tx"}});
+    }
+    
+    __testing = { 
+        "queries": [ 
+          { "name": "getDrivers", "args": [ ] }
+        ],
+        "events": [ 
+          { "domain": "subscription", "type": "newDriver", "attrs" : ["rxRole", "toEci"] }
+        ]
+    }
+  }
+  
+  rule addDriver {
+    select when subscription newDriver
+    
+    send_directive("driversManager", {"newDriver":event:attr("toEci")});
+    
+    always {
+      raise subscription event "introduction" 
+        attributes {
+          "rxRole" : event:attr("rxRole"),
+          "txRole" : "driver",
+          "toEci" : event:attr("toEci")
+        }
+    }
+    
+  }
+  
+}
