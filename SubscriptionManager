@@ -1,0 +1,51 @@
+ruleset SubscriptionManager {
+  meta {
+    use module io.picolabs.subscription alias Subscriptions
+    
+    shares __testing
+    logging on
+  }
+  
+  global {
+    
+  }
+   
+  rule introduceSub {
+  select when subscription introduction
+    pre {
+      channel = engine:listChannels().filter(function(x){x{"name"} == "main"})[0];
+      myEci = channel{"id"};
+    }
+    
+    every {
+      send_directive("subscription", {"introducing": event:attr("toEci")});
+      event:send(
+        {
+          "eci": myEci, "eid": "subIntro",
+          "domain": "wrangler", "type": "subscription",
+          "attrs": { 
+            "name": event:attr("name").defaultsTo("driver"),
+            "Rx_role": event:attr("rxRole"),
+            "Tx_role": event:attr("txRole"),
+            "channel_type": "subscription",
+            "wellKnown_Tx": event:attr("toEci")
+          } 
+        }
+      )
+    }
+  }
+  
+  rule acceptSubAuto {
+    select when wrangler inbound_pending_subscription_added
+    pre {
+      info = event:attr("Rx_role") + "_" + event:attr("Tx_role");
+    }
+    
+    send_directive("subscription", {"acceptingAuto": info});
+    
+    fired {
+      raise wrangler event "pending_subscription_approval"
+        attributes event:attrs
+    }
+  }
+}
