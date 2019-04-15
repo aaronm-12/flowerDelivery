@@ -15,10 +15,10 @@ ruleset StoreFlowers {
           
         ],
        "events": [ 
-          { "domain": "store", "type": "newOrder", "attrs" : ["minRank"] },
+          { "domain": "store", "type": "newOrder", "attrs" : ["flowerType", "maxTime", "minRank"] },
           // { "domain": "store", "type": "fakeBidConfirmation", "attrs" : ["id", "fromEci"] },
-          { "domain": "b", "type": "c", "attrs" : ["id", "fromEci"] }
-
+          { "domain": "store", "type": "fakeConfirmation", "attrs" : ["id", "fromEci"] },
+          { "domain": "store", "type": "init", "attrs" : [] }
         ]
     }
     
@@ -29,6 +29,15 @@ ruleset StoreFlowers {
     getBids = function() {
       ent:bids.decode()
     }
+    
+    getBestBid = function(bids) {
+      sorted = bids.values().sort(function(a,b) {
+        a{"bid"} > b{"bid"} => -1 
+        | a{"bid"} == b{"bid"} =>  0 
+        | 1
+      });
+      sorted.klog()[0]
+    }
   }
   
   rule informOrder {
@@ -37,6 +46,7 @@ ruleset StoreFlowers {
     pre {
       order = {
         "store" : meta:picoId, "id" : ent:id.defaultsTo(0),
+        "flowerType" : event:attr("flowerType"), "maxTime" : event:attr("maxTime"),
         "minRank" : event:attr("minRank")
       };
       
@@ -65,7 +75,7 @@ ruleset StoreFlowers {
   }
   
   rule fakeBidConfirmation {
-    select when b c 
+    select when store fakeConfirmation
     pre {
       bid = ent:bids{[event:attr("id"), event:attr("fromEci")]}.klog();
     }
@@ -91,6 +101,27 @@ ruleset StoreFlowers {
 
     always {
       ent:bids{[order{"id"}, event:attr("bid"){"fromEci"}]} := event:attr("bid");
+    }
+  }
+  
+  rule checkConfirmBid {
+    select when store requestedOrder
+    
+    pre {
+      bids = ent:bids{event:attr("bid"){"orderId"}};
+      bidsCount = bids.keys().length();
+      bestBid = getBestBid(bids);
+      info = bestBid{"fromEci"} + ":" + bestBid{"bid"};
+    }
+    
+    if(bidsCount >= ent:bidsWanted.defaultsTo(2)) then
+      send_directive("store", {"confirming bid": info})
+
+    fired {
+      raise store event "bidConfirmed"
+        attributes {
+          "bid" : bestBid
+        }
     }
   }
   
@@ -128,6 +159,17 @@ ruleset StoreFlowers {
       ent:pendingOrders := ent:pendingOrders.delete(finishedId);
     }
     
+  }
+  
+  rule init {
+    select when store init
+    
+    always {
+      ent:bids := {};
+      ent:id := 0;
+      ent:pendingOrders := {};
+      ent:bidsWanted := 2;
+    }
   }
   
 }
