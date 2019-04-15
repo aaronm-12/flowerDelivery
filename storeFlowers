@@ -1,0 +1,133 @@
+ruleset StoreFlowers {
+  meta {
+      use module io.picolabs.subscription alias Subscriptions
+      use module DriversManager
+    
+      shares __testing, getPendingOrders, getBids
+      logging on
+  }
+  
+  global {
+    __testing = {
+      "queries": [ 
+          { "name": "getPendingOrders", "args": [ ] },
+          { "name": "getBids", "args": [ ] }
+          
+        ],
+       "events": [ 
+          { "domain": "store", "type": "newOrder", "attrs" : ["minRank"] },
+          // { "domain": "store", "type": "fakeBidConfirmation", "attrs" : ["id", "fromEci"] },
+          { "domain": "b", "type": "c", "attrs" : ["id", "fromEci"] }
+
+        ]
+    }
+    
+    getPendingOrders = function() {
+      ent:pendingOrders.decode()
+    }
+    
+    getBids = function() {
+      ent:bids.decode()
+    }
+  }
+  
+  rule informOrder {
+    select when store newOrder 
+    
+    pre {
+      order = {
+        "store" : meta:picoId, "id" : ent:id.defaultsTo(0),
+        "minRank" : event:attr("minRank")
+      };
+      
+      driverId = DriversManager:getDrivers()[0]; //!!! unfair
+      
+      info = driverId + ":" + ent:id.defaultsTo(0);
+    }
+    
+    every {
+      event:send(
+        {
+          "eci": driverId, "eid": "new order",
+          "domain": "driver", "type": "availableOrder",
+          "attrs": { 
+            "order":order
+          } 
+        }
+      );
+      send_directive("store", {"informing new order": info});
+    }
+
+    always {
+        ent:pendingOrders := ent:pendingOrders.defaultsTo({}).put(ent:id.defaultsTo(0), order);
+        ent:id := ent:id.defaultsTo(0) + 1;
+    }
+  }
+  
+  rule fakeBidConfirmation {
+    select when b c 
+    pre {
+      bid = ent:bids{[event:attr("id"), event:attr("fromEci")]}.klog();
+    }
+    
+    // send_directive("yup", {"yup": bid});
+
+    always {
+      raise store event "bidConfirmed" 
+        attributes {
+          "bid" : bid
+        }
+    }
+  }
+ 
+  rule receiveBid {
+    select when store requestedOrder
+    pre {
+      order = ent:pendingOrders{event:attr("bid"){"orderId"}}.klog();
+      info = event:attr("bid"){"fromEci"} + ":" + event:attr("bid"){"orderId"};
+    }
+    
+    send_directive("store", {"receivingOrder": info});
+
+    always {
+      ent:bids{[order{"id"}, event:attr("bid"){"fromEci"}]} := event:attr("bid");
+    }
+  }
+  
+  rule confirmBid {
+    select when store bidConfirmed
+    
+    pre {
+      info = event:attr("bid"){"fromEci"} + ":" + event:attr("bid"){"orderId"};
+      order = ent:pendingOrders{event:attr("bid"){"orderId"}};
+    }
+    
+    every {
+      send_directive("store", {"confirmingOrder": info});
+      event:send(
+        {
+          "eci": event:attr("bid"){"fromEci"}, "eid": "confirmation",
+          "domain": "driver", "type": "confirmedOrder",
+          "attrs": { 
+            "bid":event:attr("bid"),
+            "order":order
+          } 
+        }
+      );
+    }
+  }
+  
+  rule finishOrder {
+    select when store completedOrder
+    pre {
+      finishedId = event:attr("order"){"id"};
+    }
+    
+    always {
+      ent:bids := ent:bids.delete(finishedId);
+      ent:pendingOrders := ent:pendingOrders.delete(finishedId);
+    }
+    
+  }
+  
+}
