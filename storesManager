@@ -1,0 +1,45 @@
+ruleset StoresManager {
+  meta {
+    use module io.picolabs.subscription alias Subscriptions
+    // use module SubscriptionsManager alias subsMan
+    
+    shares __testing, getStores
+    provides getStores
+    logging on
+  }
+  
+  global {
+    //returns their tx
+    getStores = function() {
+      Subscriptions:established("Tx_role", "store");
+      // subs.map(function(x){x{"Tx"}});
+    }
+    
+    __testing = { 
+        "queries": [ 
+          { "name": "getStores", "args": [ ] }
+        ],
+        "events": [ 
+          { "domain": "subscription", "type": "newStore", "attrs" : ["rxRole", "toEci", "storeId"] }
+        ]
+    }
+  }
+  
+  rule addStore {
+    select when subscription newStore
+    
+    send_directive("StoresManager", {"newStore":event:attr("toEci")});
+    
+    always {
+      // ent:stores := ent:stores.put(event:attr("storeId"), );
+      raise subscription event "introduction" 
+        attributes {
+          "name" : event:attr("storeId"),
+          "rxRole" : event:attr("rxRole"),
+          "txRole" : "Store",
+          "toEci" : event:attr("toEci")
+        }
+    }
+  }
+  
+}
