@@ -2,9 +2,12 @@ ruleset DriverFlowers {
   meta {
     use module io.picolabs.subscription alias Subscriptions
     use module StoresManager
-    
+    use module myKeys
+    use module myTwilio with
+      account_sid = keys:twilio{"sid"} and
+      auth_token = keys:twilio{"auth"}
+
     shares __testing, getOrders
-    logging on
   }
   
   global {
@@ -19,6 +22,9 @@ ruleset DriverFlowers {
           { "domain": "driver", "type": "init", "attrs" : [] }
         ]
     }
+    
+    fromNumber = "+13852573850"
+    toNumber = "18014626297"
     
     // orders = {};//{"s1":"order", "s2":"order2"}; //store:newestOrder
     
@@ -92,7 +98,15 @@ ruleset DriverFlowers {
     
     //id is unseen or greater than anything I've seen
     if(myId == null || id > myId) then
-      send_directive("driver", {"recieved order": info});
+      every {
+        send_directive("driver", {"recieved order": info});
+        
+        // myTwilio:send_sms(
+        //     toNumber,
+        //     fromNumber,
+        //     "received order " + info
+        // );
+      }
 
       
     fired {
